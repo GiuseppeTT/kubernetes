@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apimachineryapivalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +34,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
+
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
@@ -56,6 +61,9 @@ const (
 
 	// maximum number of rules in pod failure policy
 	maxPodFailurePolicyRules = 20
+
+	// maximum length of the condition reason for a pod failure policy rule
+	maxPodFailurePolicyRuleReasonLength = 128
 
 	// maximum number of values for a OnExitCodes requirement in pod failure policy
 	maxPodFailurePolicyOnExitCodesValues = 255
@@ -91,6 +99,19 @@ var (
 	supportedPodReplacementPolicy = sets.New(
 		batch.Failed,
 		batch.TerminatingOrFailed)
+
+	supportedJobReasons = sets.New(
+		batchv1.JobReasonPodFailurePolicy,
+		batchv1.JobReasonBackoffLimitExceeded,
+		batchv1.JobReasonDeadlineExceeded,
+		batchv1.JobReasonMaxFailedIndexesExceeded,
+		batchv1.JobReasonFailedIndexes,
+		batchv1.JobReasonSuccessPolicy,
+		batchv1.JobReasonCompletionsReached,
+	)
+		
+	// From https://github.com/kubernetes/kubernetes/blob/16c5a6be07bb2eab06b6e7732eb1cb759a7fe61c/staging/src/k8s.io/apimachinery/pkg/apis/meta/v1/types.go#L1658
+	conditionReasonRegexp = regexp.MustCompile(`^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`)
 )
 
 // validateGeneratedSelector validates that the generated selector on a controller object match the controller object
@@ -304,8 +325,9 @@ func validatePodFailurePolicy(spec *batch.JobSpec, fldPath *field.Path) field.Er
 	for _, containerSpec := range spec.Template.Spec.InitContainers {
 		containerNames.Insert(containerSpec.Name)
 	}
+	ruleNames := sets.NewString()
 	for i, rule := range spec.PodFailurePolicy.Rules {
-		allErrs = append(allErrs, validatePodFailurePolicyRule(spec, &rule, rulesPath.Index(i), containerNames)...)
+		allErrs = append(allErrs, validatePodFailurePolicyRule(spec, &rule, rulesPath.Index(i), containerNames, i, ruleNames)...)
 	}
 	return allErrs
 }
@@ -326,8 +348,12 @@ func validatePodReplacementPolicy(spec *batch.JobSpec, fldPath *field.Path) fiel
 	return allErrs
 }
 
-func validatePodFailurePolicyRule(spec *batch.JobSpec, rule *batch.PodFailurePolicyRule, rulePath *field.Path, containerNames sets.String) field.ErrorList {
+func validatePodFailurePolicyRule(spec *batch.JobSpec, rule *batch.PodFailurePolicyRule, rulePath *field.Path, containerNames sets.String, ruleIndex int, ruleNames sets.String) field.ErrorList {
 	var allErrs field.ErrorList
+	if rule.Name != nil {
+		allErrs = append(allErrs, validatePodFailurePolicyRuleName(spec, rule.Name, rulePath.Child("name"), ruleIndex, ruleNames)...)
+		ruleNames.Insert(*rule.Name)
+	}
 	actionPath := rulePath.Child("action")
 	if rule.Action == "" {
 		allErrs = append(allErrs, field.Required(actionPath, fmt.Sprintf("valid values: %q", sets.List(supportedPodFailurePolicyActions))))
@@ -349,6 +375,33 @@ func validatePodFailurePolicyRule(spec *batch.JobSpec, rule *batch.PodFailurePol
 	}
 	if rule.OnExitCodes == nil && len(rule.OnPodConditions) == 0 {
 		allErrs = append(allErrs, field.Invalid(rulePath, field.OmitValueType{}, "specifying one of OnExitCodes and OnPodConditions is required"))
+	}
+	return allErrs
+}
+
+func validatePodFailurePolicyRuleName(spec *batch.JobSpec, name *string, namePath *field.Path, ruleIndex int, ruleNames sets.String) field.ErrorList {
+	var allErrs field.ErrorList
+	if !feature.DefaultFeatureGate.Enabled(features.JobPodFailurePolicyName) {
+		allErrs = append(allErrs, field.Forbidden(namePath, "is disabled by feature gate"))
+		return allErrs
+	}
+	if ruleNames.Has(*name) {
+		allErrs = append(allErrs, field.Duplicate(namePath, *name))
+	}
+	if idx, err := strconv.Atoi(*name); err == nil {
+		if idx != ruleIndex && idx >= 0 && idx < len(spec.PodFailurePolicy.Rules) {
+			allErrs = append(allErrs, field.Invalid(namePath, *name, fmt.Sprintf("cannot be an integer value of another existing index (0-%d)", len(spec.PodFailurePolicy.Rules)-1)))
+		}
+	}
+	reason := fmt.Sprintf("%s_%s", batchv1.JobReasonPodFailurePolicy, *name)
+	if len(reason) > maxPodFailurePolicyRuleReasonLength {
+		allErrs = append(allErrs, field.TooLong(namePath, reason, maxPodFailurePolicyRuleReasonLength))
+	}
+	if !conditionReasonRegexp.MatchString(reason) {
+		allErrs = append(allErrs, field.Invalid(namePath, *name, "the resulting condition reason must match the regex "+conditionReasonRegexp.String()))
+	}
+	if supportedJobReasons.Has(reason) {
+		allErrs = append(allErrs, field.Invalid(namePath, *name, "the resulting condition reason cannot conflict with existing Job reasons"))
 	}
 	return allErrs
 }
