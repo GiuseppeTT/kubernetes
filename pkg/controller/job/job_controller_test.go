@@ -3110,6 +3110,7 @@ func TestSyncJobWithJobPodFailurePolicy(t *testing.T) {
 	testCases := map[string]struct {
 		enableJobPodReplacementPolicy bool
 		enableJobManagedBy            bool
+		enableJobPodFailurePolicyName bool
 		job                           batch.Job
 		pods                          []v1.Pod
 		wantConditions                []batch.JobCondition
@@ -4176,17 +4177,337 @@ func TestSyncJobWithJobPodFailurePolicy(t *testing.T) {
 				},
 			},
 		},
+		"fail job based on OnExitCodes with Name when PodFailurePolicyName is enabled": {
+			enableJobPodReplacementPolicy: true,
+			enableJobManagedBy:            true,
+			enableJobPodFailurePolicyName: true,
+			job: batch.Job{
+				TypeMeta:   metav1.TypeMeta{Kind: "Job"},
+				ObjectMeta: validObjectMeta,
+				Spec: batch.JobSpec{
+					Selector:     validSelector,
+					Template:     validTemplate,
+					Parallelism:  ptr.To[int32](1),
+					Completions:  ptr.To[int32](1),
+					BackoffLimit: ptr.To[int32](6),
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("RuleName1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5, 6, 7},
+								},
+							},
+						},
+					},
+				},
+			},
+			pods: []v1.Pod{
+				{
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name: "main-container",
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										ExitCode: 5,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantConditions: []batch.JobCondition{
+				{
+					Type:    batch.JobFailureTarget,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+				{
+					Type:    batch.JobFailed,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+			},
+			wantStatusActive:    0,
+			wantStatusFailed:    1,
+			wantStatusSucceeded: 0,
+		},
+		"fail job based on OnExitCodes without Name when PodFailurePolicyName is enabled": {
+			enableJobPodReplacementPolicy: true,
+			enableJobManagedBy:            true,
+			enableJobPodFailurePolicyName: true,
+			job: batch.Job{
+				TypeMeta:   metav1.TypeMeta{Kind: "Job"},
+				ObjectMeta: validObjectMeta,
+				Spec: batch.JobSpec{
+					Selector:     validSelector,
+					Template:     validTemplate,
+					Parallelism:  ptr.To[int32](1),
+					Completions:  ptr.To[int32](1),
+					BackoffLimit: ptr.To[int32](6),
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5, 6, 7},
+								},
+							},
+						},
+					},
+				},
+			},
+			pods: []v1.Pod{
+				{
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name: "main-container",
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										ExitCode: 5,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantConditions: []batch.JobCondition{
+				{
+					Type:    batch.JobFailureTarget,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_0",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+				{
+					Type:    batch.JobFailed,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_0",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+			},
+			wantStatusActive:    0,
+			wantStatusFailed:    1,
+			wantStatusSucceeded: 0,
+		},
+		"fail job based on OnPodConditions with Name when PodFailurePolicyName is enabled": {
+			enableJobPodReplacementPolicy: true,
+			enableJobManagedBy:            true,
+			enableJobPodFailurePolicyName: true,
+			job: batch.Job{
+				TypeMeta:   metav1.TypeMeta{Kind: "Job"},
+				ObjectMeta: validObjectMeta,
+				Spec: batch.JobSpec{
+					Selector:     validSelector,
+					Template:     validTemplate,
+					Parallelism:  ptr.To[int32](1),
+					Completions:  ptr.To[int32](1),
+					BackoffLimit: ptr.To[int32](6),
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("RuleName1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnPodConditions: []batch.PodFailurePolicyOnPodConditionsPattern{
+									{
+										Type:   v1.DisruptionTarget,
+										Status: v1.ConditionTrue,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			pods: []v1.Pod{
+				{
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						Conditions: []v1.PodCondition{
+							{
+								Type:   v1.DisruptionTarget,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				},
+			},
+			wantConditions: []batch.JobCondition{
+				{
+					Type:    batch.JobFailureTarget,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Pod default/mypod-0 has condition DisruptionTarget matching FailJob rule at index 0",
+				},
+				{
+					Type:    batch.JobFailed,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Pod default/mypod-0 has condition DisruptionTarget matching FailJob rule at index 0",
+				},
+			},
+			wantStatusActive:    0,
+			wantStatusFailed:    1,
+			wantStatusSucceeded: 0,
+		},
+		"fail job based on OnPodConditions without Name when PodFailurePolicyName is enabled": {
+			enableJobPodReplacementPolicy: true,
+			enableJobManagedBy:            true,
+			enableJobPodFailurePolicyName: true,
+			job: batch.Job{
+				TypeMeta:   metav1.TypeMeta{Kind: "Job"},
+				ObjectMeta: validObjectMeta,
+				Spec: batch.JobSpec{
+					Selector:     validSelector,
+					Template:     validTemplate,
+					Parallelism:  ptr.To[int32](1),
+					Completions:  ptr.To[int32](1),
+					BackoffLimit: ptr.To[int32](6),
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnPodConditions: []batch.PodFailurePolicyOnPodConditionsPattern{
+									{
+										Type:   v1.DisruptionTarget,
+										Status: v1.ConditionTrue,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			pods: []v1.Pod{
+				{
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						Conditions: []v1.PodCondition{
+							{
+								Type:   v1.DisruptionTarget,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				},
+			},
+			wantConditions: []batch.JobCondition{
+				{
+					Type:    batch.JobFailureTarget,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_0",
+					Message: "Pod default/mypod-0 has condition DisruptionTarget matching FailJob rule at index 0",
+				},
+				{
+					Type:    batch.JobFailed,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_0",
+					Message: "Pod default/mypod-0 has condition DisruptionTarget matching FailJob rule at index 0",
+				},
+			},
+			wantStatusActive:    0,
+			wantStatusFailed:    1,
+			wantStatusSucceeded: 0,
+		},
+		"fail job based on OnExitCodes with Name when PodFailurePolicyName is disabled but an existing condition exists": {
+			enableJobPodReplacementPolicy: true,
+			enableJobManagedBy:            true,
+			enableJobPodFailurePolicyName: false,
+			job: batch.Job{
+				TypeMeta:   metav1.TypeMeta{Kind: "Job"},
+				ObjectMeta: validObjectMeta,
+				Spec: batch.JobSpec{
+					Selector:     validSelector,
+					Template:     validTemplate,
+					Parallelism:  ptr.To[int32](1),
+					Completions:  ptr.To[int32](1),
+					BackoffLimit: ptr.To[int32](6),
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("RuleName1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5, 6, 7},
+								},
+							},
+						},
+					},
+				},
+				Status: batch.JobStatus{
+					Conditions: []batch.JobCondition{
+						{
+							Type:    batch.JobFailureTarget,
+							Status:  v1.ConditionTrue,
+							Reason:  "PodFailurePolicy_RuleName1",
+							Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+						},
+					},
+				},
+			},
+			pods: []v1.Pod{
+				{
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name: "main-container",
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										ExitCode: 5,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantConditions: []batch.JobCondition{
+				{
+					Type:    batch.JobFailureTarget,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+				{
+					Type:    batch.JobFailed,
+					Status:  v1.ConditionTrue,
+					Reason:  "PodFailurePolicy_RuleName1",
+					Message: "Container main-container for pod default/mypod-0 failed with exit code 5 matching FailJob rule at index 0",
+				},
+			},
+			wantStatusActive:    0,
+			wantStatusFailed:    1,
+			wantStatusSucceeded: 0,
+		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			if !tc.enableJobPodReplacementPolicy {
+			if tc.enableJobPodFailurePolicyName {
+				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, feature.DefaultFeatureGate, utilversion.MustParse("1.37"))
+			} else if !tc.enableJobPodReplacementPolicy {
 				// TODO: this will be removed in 1.37.
 				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, feature.DefaultFeatureGate, utilversion.MustParse("1.33"))
 			}
-			featuregatetesting.SetFeatureGatesDuringTest(t, feature.DefaultFeatureGate, featuregatetesting.FeatureOverrides{
+			featureOverrides := featuregatetesting.FeatureOverrides{
 				features.JobPodReplacementPolicy: tc.enableJobPodReplacementPolicy,
 				features.JobManagedBy:            tc.enableJobManagedBy,
-			})
+			}
+			if tc.enableJobPodFailurePolicyName {
+				featureOverrides[features.JobPodFailurePolicyName] = true
+			}
+			featuregatetesting.SetFeatureGatesDuringTest(t, feature.DefaultFeatureGate, featureOverrides)
 
 			if tc.job.Spec.PodReplacementPolicy == nil {
 				tc.job.Spec.PodReplacementPolicy = podReplacementPolicy(batch.Failed)

@@ -31,10 +31,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilversion "k8s.io/apimachinery/pkg/util/version"
+	"k8s.io/apiserver/pkg/util/feature"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	podtest "k8s.io/kubernetes/pkg/api/pod/testing"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	corevalidation "k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/utils/ptr"
 )
 
@@ -611,6 +616,26 @@ func TestValidateJob(t *testing.T) {
 				},
 			},
 			opts: JobValidationOptions{RequirePrefixedLabels: true},
+		},
+		`spec.podFailurePolicy.rules[0].name: Forbidden: is disabled by feature gate`: {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{{
+							Name:   ptr.To("validName"),
+							Action: batch.PodFailurePolicyActionFailJob,
+							OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+								Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+								Values:   []int32{1},
+							},
+						}},
+					},
+				},
+			},
 		},
 		`spec.podFailurePolicy.rules[0]: Invalid value: specifying one of OnExitCodes and OnPodConditions is required`: {
 			job: batch.Job{
@@ -1458,6 +1483,210 @@ func TestValidateJob(t *testing.T) {
 				if err.Field != s[0] || !strings.Contains(err.Error(), s[1]) {
 					t.Errorf("unexpected error: %v, expected: %s", err, k)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateJobPodFailurePolicyName(t *testing.T) {
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, feature.DefaultFeatureGate, utilversion.MustParse("1.37"))
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.JobPodFailurePolicyName, true)
+
+	validJobObjectMeta := metav1.ObjectMeta{
+		Name:      "myjob",
+		Namespace: metav1.NamespaceDefault,
+		UID:       types.UID("1a2b3c"),
+	}
+	validGeneratedSelector := getValidGeneratedSelector()
+	validPodTemplateSpecForGeneratedRestartPolicyNever := getValidPodTemplateSpecForGenerated(validGeneratedSelector)
+	validPodTemplateSpecForGeneratedRestartPolicyNever.Spec.RestartPolicy = api.RestartPolicyNever
+
+	successCases := map[string]struct {
+		job  batch.Job
+		opts JobValidationOptions
+	}{
+		"valid pod failure policy rule name": {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("Rule1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+							{
+								Name:   ptr.To("Rule2"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{2},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"missing pod failure policy rule name": { // still valid since Name is optional
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	errorCases := map[string]struct {
+		job  batch.Job
+		opts JobValidationOptions
+	}{
+		`spec.podFailurePolicy.rules[1].name: Duplicate value: "Rule1"`: {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("Rule1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+							{
+								Name:   ptr.To("Rule1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{2},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		`spec.podFailurePolicy.rules[0].name: Invalid value: "1": cannot be an integer value of another existing index (0-1)`: {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("1"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+							{
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{2},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		`spec.podFailurePolicy.rules[0].name: Too long: may not be more than 128 bytes`: {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To(strings.Repeat("a", 112)),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		`spec.podFailurePolicy.rules[0].name: Invalid value`: {
+			opts: JobValidationOptions{RequirePrefixedLabels: true},
+			job: batch.Job{
+				ObjectMeta: validJobObjectMeta,
+				Spec: batch.JobSpec{
+					Selector: validGeneratedSelector,
+					Template: validPodTemplateSpecForGeneratedRestartPolicyNever,
+					PodFailurePolicy: &batch.PodFailurePolicy{
+						Rules: []batch.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("invalid-name-!"),
+								Action: batch.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{1},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for k, v := range successCases {
+		t.Run(k, func(t *testing.T) {
+			if errs := ValidateJob(&v.job, v.opts); len(errs) != 0 {
+				t.Errorf("Got unexpected validation errors: %v", errs)
+			}
+		})
+	}
+	for k, v := range errorCases {
+		t.Run(k, func(t *testing.T) {
+			errs := ValidateJob(&v.job, v.opts)
+			if len(errs) == 0 {
+				t.Errorf("Expected validation errors")
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), k) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Did not find expected validation error %q in %v", k, errs)
 			}
 		})
 	}

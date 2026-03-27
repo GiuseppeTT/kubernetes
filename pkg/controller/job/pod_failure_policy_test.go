@@ -17,6 +17,7 @@ limitations under the License.
 package job
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -43,8 +44,10 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 
 	testCases := map[string]struct {
 		enableJobBackoffLimitPerIndex bool
+		enableJobPodFailurePolicyName bool
 		podFailurePolicy              *batch.PodFailurePolicy
 		failedPod                     *v1.Pod
+		wantJobFailReason             *string
 		wantJobFailureMessage         *string
 		wantCountFailed               bool
 		wantAction                    *batch.PodFailurePolicyAction
@@ -84,6 +87,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 2 matching FailJob rule at index 1"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -123,6 +127,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -162,6 +167,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 2 matching FailJob rule at index 1"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -183,6 +189,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 		},
@@ -213,6 +220,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -244,6 +252,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -276,6 +285,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 2 matching FailJob rule at index 0"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -326,6 +336,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 		},
@@ -427,6 +438,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 1 matching FailJob rule at index 0"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -466,6 +478,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 6 matching FailJob rule at index 1"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -501,6 +514,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 			wantAction:            &count,
@@ -591,6 +605,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -621,6 +636,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -651,6 +667,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       false,
 			wantAction:            &ignore,
@@ -681,6 +698,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 		},
@@ -710,6 +728,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 		},
@@ -739,6 +758,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 		},
@@ -768,6 +788,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     ptr.To(batch.JobReasonPodFailurePolicy),
 			wantJobFailureMessage: ptr.To("Pod default/mypod has condition DisruptionTarget matching FailJob rule at index 0"),
 			wantCountFailed:       true,
 			wantAction:            &failJob,
@@ -798,6 +819,7 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 			wantAction:            &count,
@@ -861,19 +883,95 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 					},
 				},
 			},
+			wantJobFailReason:     nil,
 			wantJobFailureMessage: nil,
 			wantCountFailed:       true,
 			wantAction:            &count,
 		},
+		"FailJob rule matched for exit codes with named rule": {
+			enableJobBackoffLimitPerIndex: true,
+			enableJobPodFailurePolicyName: true,
+			podFailurePolicy: &batch.PodFailurePolicy{
+				Rules: []batch.PodFailurePolicyRule{
+					{
+						Action: batch.PodFailurePolicyActionFailJob,
+						Name:   ptr.To("MyRule"),
+						OnExitCodes: &batch.PodFailurePolicyOnExitCodesRequirement{
+							Operator: batch.PodFailurePolicyOnExitCodesOpIn,
+							Values:   []int32{1, 2, 3},
+						},
+					},
+				},
+			},
+			failedPod: &v1.Pod{
+				ObjectMeta: validPodObjectMeta,
+				Status: v1.PodStatus{
+					Phase: v1.PodFailed,
+					ContainerStatuses: []v1.ContainerStatus{
+						{
+							Name: "main-container",
+							State: v1.ContainerState{
+								Terminated: &v1.ContainerStateTerminated{
+									ExitCode: 2,
+								},
+							},
+						},
+					},
+				},
+			},
+			wantJobFailReason:     ptr.To(fmt.Sprintf("%s_%s", batch.JobReasonPodFailurePolicy, "MyRule")),
+			wantJobFailureMessage: ptr.To("Container main-container for pod default/mypod failed with exit code 2 matching FailJob rule at index 0"),
+			wantCountFailed:       true,
+			wantAction:            &failJob,
+		},
+		"FailJob rule matched for pod conditions with unnamed rule": {
+			enableJobBackoffLimitPerIndex: true,
+			enableJobPodFailurePolicyName: true,
+			podFailurePolicy: &batch.PodFailurePolicy{
+				Rules: []batch.PodFailurePolicyRule{
+					{
+						Action: batch.PodFailurePolicyActionFailJob,
+						OnPodConditions: []batch.PodFailurePolicyOnPodConditionsPattern{
+							{
+								Type:   v1.DisruptionTarget,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				},
+			},
+			failedPod: &v1.Pod{
+				ObjectMeta: validPodObjectMeta,
+				Status: v1.PodStatus{
+					Phase: v1.PodFailed,
+					Conditions: []v1.PodCondition{
+						{
+							Type:   v1.DisruptionTarget,
+							Status: v1.ConditionTrue,
+						},
+					},
+				},
+			},
+			wantJobFailReason:     ptr.To(fmt.Sprintf("%s_%d", batch.JobReasonPodFailurePolicy, 0)),
+			wantJobFailureMessage: ptr.To("Pod default/mypod has condition DisruptionTarget matching FailJob rule at index 0"),
+			wantCountFailed:       true,
+			wantAction:            &failJob,
+		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			if !tc.enableJobBackoffLimitPerIndex {
+			if tc.enableJobPodFailurePolicyName {
+				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, utilversion.MustParse("1.37"))
+				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.JobPodFailurePolicyName, true)
+			} else if !tc.enableJobBackoffLimitPerIndex {
 				// TODO: this will be removed in 1.36
 				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, utilversion.MustParse("1.32"))
 			}
 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.JobBackoffLimitPerIndex, tc.enableJobBackoffLimitPerIndex)
-			jobFailMessage, countFailed, action := matchPodFailurePolicy(tc.podFailurePolicy, tc.failedPod)
+			jobFailReason, jobFailMessage, countFailed, action := matchPodFailurePolicy(tc.podFailurePolicy, tc.failedPod)
+			if diff := cmp.Diff(tc.wantJobFailReason, jobFailReason); diff != "" {
+				t.Errorf("Unexpected job failure reason: %s", diff)
+			}
 			if diff := cmp.Diff(tc.wantJobFailureMessage, jobFailMessage); diff != "" {
 				t.Errorf("Unexpected job failure message: %s", diff)
 			}
@@ -882,6 +980,79 @@ func TestMatchPodFailurePolicy(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.wantAction, action); diff != "" {
 				t.Errorf("Unexpected failure policy action: %s", diff)
+			}
+		})
+	}
+}
+
+func TestGetMatchingJobFailureReason(t *testing.T) {
+	testCases := map[string]struct {
+		enableJobPodFailurePolicyName bool
+		podFailurePolicyRule          batch.PodFailurePolicyRule
+		index                         int
+		wantReason                    string
+	}{
+		"feature gate disabled": {
+			enableJobPodFailurePolicyName: false,
+			podFailurePolicyRule: batch.PodFailurePolicyRule{
+				Name: ptr.To("MyRule"),
+			},
+			index:      0,
+			wantReason: batch.JobReasonPodFailurePolicy,
+		},
+		"feature gate enabled, unnamed rule": {
+			enableJobPodFailurePolicyName: true,
+			podFailurePolicyRule:          batch.PodFailurePolicyRule{},
+			index:                         2,
+			wantReason:                    fmt.Sprintf("%s_%d", batch.JobReasonPodFailurePolicy, 2),
+		},
+		"feature gate enabled, named rule": {
+			enableJobPodFailurePolicyName: true,
+			podFailurePolicyRule: batch.PodFailurePolicyRule{
+				Name: ptr.To("MyNewRule"),
+			},
+			index:      3,
+			wantReason: fmt.Sprintf("%s_%s", batch.JobReasonPodFailurePolicy, "MyNewRule"),
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			if tc.enableJobPodFailurePolicyName {
+				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, utilversion.MustParse("1.37"))
+				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.JobPodFailurePolicyName, true)
+			}
+			gotReason := getMatchingJobFailureReason(tc.podFailurePolicyRule, tc.index)
+			if diff := cmp.Diff(tc.wantReason, gotReason); diff != "" {
+				t.Errorf("Unexpected reason: %s", diff)
+			}
+		})
+	}
+}
+
+func TestGetMatchingJobFailureName(t *testing.T) {
+	testCases := map[string]struct {
+		podFailurePolicyRule batch.PodFailurePolicyRule
+		index                int
+		wantName             string
+	}{
+		"unnamed rule": {
+			podFailurePolicyRule: batch.PodFailurePolicyRule{},
+			index:                1,
+			wantName:             "1",
+		},
+		"named rule": {
+			podFailurePolicyRule: batch.PodFailurePolicyRule{
+				Name: ptr.To("MyRule"),
+			},
+			index:    2,
+			wantName: "MyRule",
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			gotName := getMatchingJobFailureName(tc.podFailurePolicyRule, tc.index)
+			if diff := cmp.Diff(tc.wantName, gotName); diff != "" {
+				t.Errorf("Unexpected name: %s", diff)
 			}
 		})
 	}
