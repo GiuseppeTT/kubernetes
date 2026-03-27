@@ -19,6 +19,7 @@ package job
 import (
 	"fmt"
 	"slices"
+	"strconv"
 
 	batch "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
@@ -28,14 +29,15 @@ import (
 
 // matchPodFailurePolicy returns information about matching a given failed pod
 // against the pod failure policy rules. The information is represented as an
+//   - optional job failure reason (present in case the pod matched a 'FailJob' rule),
 //   - optional job failure message (present in case the pod matched a 'FailJob' rule),
 //   - a boolean indicating if the failure should be counted towards backoffLimit
 //     (and backoffLimitPerIndex if specified). It should not be counted
 //     if the pod matched an 'Ignore' rule,
 //   - a pointer to the matched pod failure policy action.
-func matchPodFailurePolicy(podFailurePolicy *batch.PodFailurePolicy, failedPod *v1.Pod) (*string, bool, *batch.PodFailurePolicyAction) {
+func matchPodFailurePolicy(podFailurePolicy *batch.PodFailurePolicy, failedPod *v1.Pod) (*string, *string, bool, *batch.PodFailurePolicyAction) {
 	if podFailurePolicy == nil {
-		return nil, true, nil
+		return nil, nil, true, nil
 	}
 	ignore := batch.PodFailurePolicyActionIgnore
 	failJob := batch.PodFailurePolicyActionFailJob
@@ -46,39 +48,41 @@ func matchPodFailurePolicy(podFailurePolicy *batch.PodFailurePolicy, failedPod *
 			if containerStatus := matchOnExitCodes(&failedPod.Status, podFailurePolicyRule.OnExitCodes); containerStatus != nil {
 				switch podFailurePolicyRule.Action {
 				case batch.PodFailurePolicyActionIgnore:
-					return nil, false, &ignore
+					return nil, nil, false, &ignore
 				case batch.PodFailurePolicyActionFailIndex:
 					if feature.DefaultFeatureGate.Enabled(features.JobBackoffLimitPerIndex) {
-						return nil, true, &failIndex
+						return nil, nil, true, &failIndex
 					}
 				case batch.PodFailurePolicyActionCount:
-					return nil, true, &count
+					return nil, nil, true, &count
 				case batch.PodFailurePolicyActionFailJob:
+					reason := getMatchingJobFailureReason(podFailurePolicyRule, index)
 					msg := fmt.Sprintf("Container %s for pod %s/%s failed with exit code %v matching %v rule at index %d",
 						containerStatus.Name, failedPod.Namespace, failedPod.Name, containerStatus.State.Terminated.ExitCode, podFailurePolicyRule.Action, index)
-					return &msg, true, &failJob
+					return &reason, &msg, true, &failJob
 				}
 			}
 		} else if podFailurePolicyRule.OnPodConditions != nil {
 			if podCondition := matchOnPodConditions(&failedPod.Status, podFailurePolicyRule.OnPodConditions); podCondition != nil {
 				switch podFailurePolicyRule.Action {
 				case batch.PodFailurePolicyActionIgnore:
-					return nil, false, &ignore
+					return nil, nil, false, &ignore
 				case batch.PodFailurePolicyActionFailIndex:
 					if feature.DefaultFeatureGate.Enabled(features.JobBackoffLimitPerIndex) {
-						return nil, true, &failIndex
+						return nil, nil, true, &failIndex
 					}
 				case batch.PodFailurePolicyActionCount:
-					return nil, true, &count
+					return nil, nil, true, &count
 				case batch.PodFailurePolicyActionFailJob:
+					reason := getMatchingJobFailureReason(podFailurePolicyRule, index)
 					msg := fmt.Sprintf("Pod %s/%s has condition %v matching %v rule at index %d",
 						failedPod.Namespace, failedPod.Name, podCondition.Type, podFailurePolicyRule.Action, index)
-					return &msg, true, &failJob
+					return &reason, &msg, true, &failJob
 				}
 			}
 		}
 	}
-	return nil, true, nil
+	return nil, nil, true, nil
 }
 
 // matchOnExitCodes returns a terminated container status that matches the error code requirement, if any exists.
@@ -129,4 +133,19 @@ func isOnExitCodesOperatorMatching(exitCode int32, requirement *batch.PodFailure
 	default:
 		return false
 	}
+}
+
+func getMatchingJobFailureReason(podFailurePolicyRule batch.PodFailurePolicyRule, index int) string {
+	if !feature.DefaultFeatureGate.Enabled(features.JobPodFailurePolicyName) {
+		return batch.JobReasonPodFailurePolicy
+	}
+	name := getMatchingJobFailureName(podFailurePolicyRule, index)
+	return fmt.Sprintf("%s_%s", batch.JobReasonPodFailurePolicy, name)
+}
+
+func getMatchingJobFailureName(podFailurePolicyRule batch.PodFailurePolicyRule, index int) string {
+	if podFailurePolicyRule.Name == nil {
+		return strconv.Itoa(index)
+	}
+	return *podFailurePolicyRule.Name
 }

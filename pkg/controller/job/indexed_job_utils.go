@@ -99,7 +99,7 @@ func isIndexFailed(logger klog.Logger, job *batch.Job, pod *v1.Pod) bool {
 	isPodFailedCounted := false
 	if isPodFailed(pod, job) {
 		if job.Spec.PodFailurePolicy != nil {
-			_, countFailed, action := matchPodFailurePolicy(job.Spec.PodFailurePolicy, pod)
+			_, _, countFailed, action := matchPodFailurePolicy(job.Spec.PodFailurePolicy, pod)
 			if action != nil && *action == batch.PodFailurePolicyActionFailIndex {
 				return true
 			}
@@ -362,7 +362,7 @@ func getNewIndexFailureCounts(logger klog.Logger, job *batch.Job, podBeingReplac
 		indexFailureCount := parseIndexFailureCountAnnotation(logger, podBeingReplaced)
 		indexIgnoredFailureCount := parseIndexFailureIgnoreCountAnnotation(logger, podBeingReplaced)
 		if job.Spec.PodFailurePolicy != nil {
-			_, countFailed, _ := matchPodFailurePolicy(job.Spec.PodFailurePolicy, podBeingReplaced)
+			_, _, countFailed, _ := matchPodFailurePolicy(job.Spec.PodFailurePolicy, podBeingReplaced)
 			if countFailed {
 				indexFailureCount++
 			} else {

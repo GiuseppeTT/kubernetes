@@ -1076,9 +1076,9 @@ func (jm *Controller) syncJob(ctx context.Context, key string) (rErr error) {
 		if failureTargetCondition != nil && failureTargetCondition.Status == v1.ConditionTrue {
 			jobCtx.finishedCondition = newFailedConditionForFailureTarget(failureTargetCondition, jm.clock.Now())
 			// Evaluate failure scenarios for PodFailurePolicy.
-		} else if failJobMessage := getFailJobMessage(&job, pods); failJobMessage != nil {
+		} else if failJobReason, failJobMessage := getFailJobReasonAndMessage(&job, pods); failJobMessage != nil {
 			// Prepare the interim FailureTarget condition to record the failure message before the finalizers (allowing removal of the pods) are removed.
-			jobCtx.finishedCondition = newCondition(batch.JobFailureTarget, v1.ConditionTrue, batch.JobReasonPodFailurePolicy, *failJobMessage, jm.clock.Now())
+			jobCtx.finishedCondition = newCondition(batch.JobFailureTarget, v1.ConditionTrue, *failJobReason, *failJobMessage, jm.clock.Now())
 		}
 	}
 	// Evaluate failure scenarios for BackoffLimit and ActiveDeadlineSeconds.
@@ -1268,7 +1268,7 @@ func nonIgnoredFailedPodsCount(jobCtx *syncJobCtx, failedPods []*v1.Pod) int {
 	result := len(failedPods)
 	if jobCtx.job.Spec.PodFailurePolicy != nil {
 		for _, p := range failedPods {
-			_, countFailed, _ := matchPodFailurePolicy(jobCtx.job.Spec.PodFailurePolicy, p)
+			_, _, countFailed, _ := matchPodFailurePolicy(jobCtx.job.Spec.PodFailurePolicy, p)
 			if !countFailed {
 				result--
 			}
@@ -1381,7 +1381,7 @@ func (jm *Controller) trackJobStatusAndRemoveFinalizers(ctx context.Context, job
 			ix := getCompletionIndex(pod.Annotations)
 			if !jobCtx.uncounted.failed.Has(pod.UID) && (!isIndexed || (ix != unknownCompletionIndex && ix < int(*jobCtx.job.Spec.Completions))) {
 				if jobCtx.job.Spec.PodFailurePolicy != nil {
-					_, countFailed, action := matchPodFailurePolicy(jobCtx.job.Spec.PodFailurePolicy, pod)
+					_, _, countFailed, action := matchPodFailurePolicy(jobCtx.job.Spec.PodFailurePolicy, pod)
 					if action != nil {
 						podFailureCountByPolicyAction[string(*action)] += 1
 					}
@@ -1734,20 +1734,20 @@ func newCondition(conditionType batch.JobConditionType, status v1.ConditionStatu
 	}
 }
 
-// getFailJobMessage returns a job failure message if the job should fail with the current counters
-func getFailJobMessage(job *batch.Job, pods []*v1.Pod) *string {
+// getFailJobReasonAndMessage returns a job failure reason and message if the job should fail with the current counters
+func getFailJobReasonAndMessage(job *batch.Job, pods []*v1.Pod) (*string, *string) {
 	if job.Spec.PodFailurePolicy == nil {
-		return nil
+		return nil, nil
 	}
 	for _, p := range pods {
 		if isPodFailed(p, job) {
-			jobFailureMessage, _, _ := matchPodFailurePolicy(job.Spec.PodFailurePolicy, p)
+			jobFailureReason, jobFailureMessage, _, _ := matchPodFailurePolicy(job.Spec.PodFailurePolicy, p)
 			if jobFailureMessage != nil {
-				return jobFailureMessage
+				return jobFailureReason, jobFailureMessage
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // getNewFinishedPods returns the list of newly succeeded and failed pods that are not accounted
