@@ -99,6 +99,7 @@
         "podFailurePolicy": {
           "rules": [
             {
+              "name": "nameValue",
               "action": "actionValue",
               "onExitCodes": {
                 "containerName": "containerNameValue",

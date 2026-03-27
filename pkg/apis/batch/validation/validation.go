@@ -109,7 +109,7 @@ var (
 		batchv1.JobReasonSuccessPolicy,
 		batchv1.JobReasonCompletionsReached,
 	)
-		
+
 	// From https://github.com/kubernetes/kubernetes/blob/16c5a6be07bb2eab06b6e7732eb1cb759a7fe61c/staging/src/k8s.io/apimachinery/pkg/apis/meta/v1/types.go#L1658
 	conditionReasonRegexp = regexp.MustCompile(`^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`)
 )

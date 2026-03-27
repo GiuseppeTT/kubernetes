@@ -28,6 +28,13 @@ import (
 // PodFailurePolicyRule describes how a pod failure is handled when the requirements are met.
 // One of onExitCodes and onPodConditions, but not both, can be used in each rule.
 type PodFailurePolicyRuleApplyConfiguration struct {
+	// Specifies the name of the rule. This field provides a way to identify the rule when
+	// it is evaluated. When the rule matches a pod failure, the name of the rule is appended
+	// to the "PodFailurePolicy" condition reason in the format "PodFailurePolicy_{ruleName}".
+	// If the value is nill, the Job controller will default the condition reason to
+	// "PodFailurePolicy_{ruleIndex}".
+	// This field is used in the alpha-level feature: https://kep.k8s.io/4443.
+	Name *string `json:"name,omitempty"`
 	// Specifies the action taken on a pod failure when the requirements are satisfied.
 	// Possible values are:
 	//
@@ -54,6 +61,14 @@ type PodFailurePolicyRuleApplyConfiguration struct {
 // apply.
 func PodFailurePolicyRule() *PodFailurePolicyRuleApplyConfiguration {
 	return &PodFailurePolicyRuleApplyConfiguration{}
+}
+
+// WithName sets the Name field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Name field is set to the value of the last call.
+func (b *PodFailurePolicyRuleApplyConfiguration) WithName(value string) *PodFailurePolicyRuleApplyConfiguration {
+	b.Name = &value
+	return b
 }
 
 // WithAction sets the Action field in the declarative configuration to the given value

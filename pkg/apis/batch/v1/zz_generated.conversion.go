@@ -632,6 +632,7 @@ func Convert_batch_PodFailurePolicyOnPodConditionsPattern_To_v1_PodFailurePolicy
 }
 
 func autoConvert_v1_PodFailurePolicyRule_To_batch_PodFailurePolicyRule(in *batchv1.PodFailurePolicyRule, out *batch.PodFailurePolicyRule, s conversion.Scope) error {
+	out.Name = (*string)(unsafe.Pointer(in.Name))
 	out.Action = batch.PodFailurePolicyAction(in.Action)
 	out.OnExitCodes = (*batch.PodFailurePolicyOnExitCodesRequirement)(unsafe.Pointer(in.OnExitCodes))
 	out.OnPodConditions = *(*[]batch.PodFailurePolicyOnPodConditionsPattern)(unsafe.Pointer(&in.OnPodConditions))
@@ -644,6 +645,7 @@ func Convert_v1_PodFailurePolicyRule_To_batch_PodFailurePolicyRule(in *batchv1.P
 }
 
 func autoConvert_batch_PodFailurePolicyRule_To_v1_PodFailurePolicyRule(in *batch.PodFailurePolicyRule, out *batchv1.PodFailurePolicyRule, s conversion.Scope) error {
+	out.Name = (*string)(unsafe.Pointer(in.Name))
 	out.Action = batchv1.PodFailurePolicyAction(in.Action)
 	out.OnExitCodes = (*batchv1.PodFailurePolicyOnExitCodesRequirement)(unsafe.Pointer(in.OnExitCodes))
 	out.OnPodConditions = *(*[]batchv1.PodFailurePolicyOnPodConditionsPattern)(unsafe.Pointer(&in.OnPodConditions))
