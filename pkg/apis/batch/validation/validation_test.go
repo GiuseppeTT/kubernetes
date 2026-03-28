@@ -33,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apiserver/pkg/util/feature"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	podtest "k8s.io/kubernetes/pkg/api/pod/testing"
 	"k8s.io/kubernetes/pkg/apis/batch"
@@ -1490,7 +1489,7 @@ func TestValidateJob(t *testing.T) {
 
 func TestValidateJobPodFailurePolicyName(t *testing.T) {
 	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, feature.DefaultFeatureGate, utilversion.MustParse("1.37"))
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.JobPodFailurePolicyName, true)
+	featuregatetesting.SetFeatureGateDuringTest(t, feature.DefaultFeatureGate, features.JobPodFailurePolicyName, true)
 
 	validJobObjectMeta := metav1.ObjectMeta{
 		Name:      "myjob",
