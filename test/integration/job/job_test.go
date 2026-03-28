@@ -545,6 +545,301 @@ func TestJobPodFailurePolicy(t *testing.T) {
 	}
 }
 
+// TestJobPodFailurePolicyConditionReason tests handling of the job failed condition reason
+// with respect to the configured pod failure policy rules and the JobPodFailurePolicyName feature gate.
+func TestJobPodFailurePolicyConditionReason(t *testing.T) {
+	t.Cleanup(setDurationDuringTest(&jobcontroller.DefaultJobPodFailureBackOff, fastPodFailureBackoff))
+	podTemplateSpec := v1.PodTemplateSpec{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:                     "main-container",
+					Image:                    "foo",
+					ImagePullPolicy:          v1.PullIfNotPresent,
+					TerminationMessagePolicy: v1.TerminationMessageFallbackToLogsOnError,
+				},
+			},
+		},
+	}
+
+	podStatusMatchingOnExitCodesFailJob := v1.PodStatus{
+		Phase: v1.PodFailed,
+		ContainerStatuses: []v1.ContainerStatus{
+			{
+				Name: "main-container",
+				State: v1.ContainerState{
+					Terminated: &v1.ContainerStateTerminated{
+						ExitCode: 5,
+					},
+				},
+			},
+		},
+	}
+
+	podStatusMatchingOnPodConditionsFailJob := v1.PodStatus{
+		Phase: v1.PodFailed,
+		Conditions: []v1.PodCondition{
+			{
+				Type:   v1.DisruptionTarget,
+				Status: v1.ConditionTrue,
+			},
+		},
+	}
+
+	testCases := map[string]struct {
+		enableFeatureGate     bool
+		job                   batchv1.Job
+		podStatus             *v1.PodStatus
+		existingJobCondition  *batchv1.JobCondition
+		wantConditionReason   string
+		wantJobFinishedMetric *metricLabelsWithValue
+	}{
+		"feature gate enabled; triggered onExitCodes rule with a Name": {
+			enableFeatureGate: true,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("myExitCodeRule"),
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batchv1.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5},
+								},
+							},
+						},
+					},
+				},
+			},
+			podStatus:           &podStatusMatchingOnExitCodesFailJob,
+			wantConditionReason: "PodFailurePolicy_myExitCodeRule",
+			wantJobFinishedMetric: &metricLabelsWithValue{
+				Labels: []string{"NonIndexed", "failed", "PodFailurePolicy_myExitCodeRule"},
+				Value:  1,
+			},
+		},
+		"feature gate enabled; triggered onExitCodes rule without a Name": {
+			enableFeatureGate: true,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batchv1.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5},
+								},
+							},
+						},
+					},
+				},
+			},
+			podStatus:           &podStatusMatchingOnExitCodesFailJob,
+			wantConditionReason: "PodFailurePolicy_0",
+			wantJobFinishedMetric: &metricLabelsWithValue{
+				Labels: []string{"NonIndexed", "failed", "PodFailurePolicy_0"},
+				Value:  1,
+			},
+		},
+		"feature gate enabled; triggered onPodConditions rule with a Name": {
+			enableFeatureGate: true,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Name:   ptr.To("myPodConditionRule"),
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{
+									{
+										Type:   v1.DisruptionTarget,
+										Status: v1.ConditionTrue,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			podStatus:           &podStatusMatchingOnPodConditionsFailJob,
+			wantConditionReason: "PodFailurePolicy_myPodConditionRule",
+			wantJobFinishedMetric: &metricLabelsWithValue{
+				Labels: []string{"NonIndexed", "failed", "PodFailurePolicy_myPodConditionRule"},
+				Value:  1,
+			},
+		},
+		"feature gate enabled; triggered onPodConditions rule without a Name": {
+			enableFeatureGate: true,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{
+									{
+										Type:   v1.DisruptionTarget,
+										Status: v1.ConditionTrue,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			podStatus:           &podStatusMatchingOnPodConditionsFailJob,
+			wantConditionReason: "PodFailurePolicy_0",
+			wantJobFinishedMetric: &metricLabelsWithValue{
+				Labels: []string{"NonIndexed", "failed", "PodFailurePolicy_0"},
+				Value:  1,
+			},
+		},
+		"feature gate disabled; triggered onExitCodes rule without a Name": {
+			enableFeatureGate: false,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batchv1.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5},
+								},
+							},
+						},
+					},
+				},
+			},
+			podStatus:           &podStatusMatchingOnExitCodesFailJob,
+			wantConditionReason: "PodFailurePolicy",
+			wantJobFinishedMetric: &metricLabelsWithValue{
+				Labels: []string{"NonIndexed", "failed", "PodFailurePolicy"},
+				Value:  1,
+			},
+		},
+		"feature gate disabled; existing Job with JobFailed condition reason PodFailurePolicy_{Name}": {
+			enableFeatureGate: false,
+			job: batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Template: podTemplateSpec,
+					PodFailurePolicy: &batchv1.PodFailurePolicy{
+						Rules: []batchv1.PodFailurePolicyRule{
+							{
+								Action: batchv1.PodFailurePolicyActionFailJob,
+								OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+									Operator: batchv1.PodFailurePolicyOnExitCodesOpIn,
+									Values:   []int32{5},
+								},
+							},
+						},
+					},
+				},
+			},
+			existingJobCondition: &batchv1.JobCondition{
+				Type:   batchv1.JobFailed,
+				Status: v1.ConditionTrue,
+				Reason: "PodFailurePolicy_myOldRule",
+			},
+			wantConditionReason: "PodFailurePolicy_myOldRule",
+		},
+	}
+
+	closeFn, restConfig, clientSet, ns := setup(t, "pod-failure-policy-condition-reason")
+	t.Cleanup(closeFn)
+
+	for name, test := range testCases {
+		t.Run(name, func(t *testing.T) {
+			resetMetrics()
+			featuregatetesting.SetFeatureGateDuringTest(t, feature.DefaultFeatureGate, features.JobPodFailurePolicyName, test.enableFeatureGate)
+
+			ctx, cancel := startJobControllerAndWaitForCaches(t, restConfig)
+			t.Cleanup(func() {
+				cancel()
+			})
+
+			jobObj, err := createJobWithDefaults(ctx, clientSet, ns.Name, &test.job)
+			if err != nil {
+				t.Fatalf("Error %q while creating the job %q", err, jobObj.Name)
+			}
+
+			if test.existingJobCondition != nil {
+				jobObj.Status.Conditions = append(jobObj.Status.Conditions, *test.existingJobCondition)
+				if test.existingJobCondition.Type == batchv1.JobFailed {
+					jobObj.Status.Conditions = append(jobObj.Status.Conditions, batchv1.JobCondition{
+						Type:   batchv1.JobFailureTarget,
+						Status: v1.ConditionTrue,
+						Reason: "SetByTestInfo",
+					})
+				}
+				jobObj.Status.StartTime = ptr.To(metav1.Now())
+				if test.existingJobCondition.Type == batchv1.JobComplete {
+					jobObj.Status.CompletionTime = ptr.To(metav1.Now())
+				}
+				jobObj, err = clientSet.BatchV1().Jobs(ns.Name).UpdateStatus(ctx, jobObj, metav1.UpdateOptions{})
+				if err != nil {
+					t.Fatalf("Error %q while updating Job status for %v", err, jobObj.Name)
+				}
+			} else {
+				validateJobPodsStatus(ctx, t, clientSet, jobObj, podsByStatus{
+					Active:      1,
+					Ready:       ptr.To[int32](0),
+					Terminating: ptr.To[int32](0),
+				})
+			}
+
+			if test.podStatus != nil {
+				op := func(p *v1.Pod) bool {
+					p.Status = *test.podStatus
+					return true
+				}
+				if _, err := updateJobPodsStatus(ctx, clientSet, jobObj, op, 1); err != nil {
+					t.Fatalf("Error %q while updating pod status for Job: %v", err, jobObj.Name)
+				}
+			}
+
+			// verify the job gets the Failed condition and reason matches
+			validateJobFailed(ctx, t, clientSet, jobObj)
+
+			err = wait.PollUntilContextTimeout(ctx, waitInterval, wait.ForeverTestTimeout, true, func(ctx context.Context) (bool, error) {
+				j, err := clientSet.BatchV1().Jobs(jobObj.Namespace).Get(ctx, jobObj.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("Failed to obtain updated Job: %v", err)
+				}
+				for _, c := range j.Status.Conditions {
+					if c.Type == batchv1.JobFailed && c.Status == v1.ConditionTrue {
+						if c.Reason == test.wantConditionReason {
+							return true, nil
+						}
+					}
+				}
+				return false, nil
+			})
+			if err != nil {
+				j, _ := clientSet.BatchV1().Jobs(jobObj.Namespace).Get(ctx, jobObj.Name, metav1.GetOptions{})
+				actualReasons := []string{}
+				for _, c := range j.Status.Conditions {
+					if c.Type == batchv1.JobFailed && c.Status == v1.ConditionTrue {
+						actualReasons = append(actualReasons, c.Reason)
+					}
+				}
+				t.Fatalf("Wait for condition reason %q timeout. Actual reasons: %v", test.wantConditionReason, actualReasons)
+			}
+
+			if test.wantJobFinishedMetric != nil {
+				validateCounterMetric(ctx, t, metrics.JobFinishedNum, *test.wantJobFinishedMetric)
+			}
+		})
+	}
+}
+
 // TestSuccessPolicy tests handling of job and its pods when
 // successPolicy is used.
 func TestSuccessPolicy(t *testing.T) {
